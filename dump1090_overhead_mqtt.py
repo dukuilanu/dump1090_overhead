@@ -5,13 +5,16 @@ import math
 import paho.mqtt.client as mqtt
 
 # --- CONFIGURATION ---
-# The lat/lon requested by the user
+# home location lat/lon
 HOME_LAT = 41.83221
 HOME_LON = -72.7511054
 MAX_DISTANCE_MILES = 2
 
-# dump1090 JSON URL (Change IP if dump1090 is running on a different machine)
+# dump1090 JSON URL
+# dump1090-fa git repo that will work for this: https://github.com/flightaware/dump1090.git
 DUMP1090_URL = "http://localhost/aircraft.json"
+
+# Virtual Radar JSON URL
 VR_URL = "http://localhost:8083/VirtualRadar/aircraftlist.json"
 
 # MQTT Broker Details
@@ -19,30 +22,29 @@ MQTT_BROKER = "homeassistant.iot"
 MQTT_PORT = 1883
 MQTT_TOPIC = "aircraft/overhead"
 MQTT_CLIENT_ID = "dump1090_overhead_notifier"
-
+MQTT_USER = "mqttuser"
+MQTT_PASS = '949500'
 # Polling Interval (in seconds)
 POLL_INTERVAL = 5
 # ---------------------
 
+# Getting a useful string for airports can be difficult:
 def get_airport(air_string):
     if ',' not in air_string:
-        #print(f"returning string, no commas")
         return air_string
     parts = air_string.rsplit(',')
+    if parts[1] != "United States":
+        return parts[1]
     if len(parts) == 3:
-        #print(f"3 commas")
         output = parts[-2]
         output = output.strip()
-        #print(output)
         return output
     elif len(parts) == 2:
-        #print(f"2 commas")
         parts2 = parts[-2].split()
         if len(parts2) == 2:
             output = parts2[1]
         else:
             output = parts2[0]
-        #print(output)
         return output
 
 def haversine_distance(lat1, lon1, lat2, lon2):
@@ -68,7 +70,7 @@ def main():
     # Setup MQTT Client
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, MQTT_CLIENT_ID)
     client.on_connect = on_connect
-    client.username_pw_set("mqttuser", "949500")
+    client.username_pw_set(MQTT_USER, MQTT_PASS)
     
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
     client.loop_start()
