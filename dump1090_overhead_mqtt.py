@@ -8,10 +8,11 @@ import paho.mqtt.client as mqtt
 # The lat/lon requested by the user
 HOME_LAT = 41.83221
 HOME_LON = -72.7511054
-MAX_DISTANCE_MILES = 1.5
+MAX_DISTANCE_MILES = 2
 
 # dump1090 JSON URL (Change IP if dump1090 is running on a different machine)
 DUMP1090_URL = "http://localhost/aircraft.json"
+VR_URL = "http://localhost:8083/VirtualRadar/aircraftlist.json"
 
 # MQTT Broker Details
 MQTT_BROKER = "homeassistant.iot"
@@ -22,6 +23,27 @@ MQTT_CLIENT_ID = "dump1090_overhead_notifier"
 # Polling Interval (in seconds)
 POLL_INTERVAL = 5
 # ---------------------
+
+def get_airport(air_string):
+    if ',' not in air_string:
+        #print(f"returning string, no commas")
+        return air_string
+    parts = air_string.rsplit(',')
+    if len(parts) == 3:
+        #print(f"3 commas")
+        output = parts[-2]
+        output = output.strip()
+        #print(output)
+        return output
+    elif len(parts) == 2:
+        #print(f"2 commas")
+        parts2 = parts[-2].split()
+        if len(parts2) == 2:
+            output = parts2[1]
+        else:
+            output = parts2[0]
+        #print(output)
+        return output
 
 def haversine_distance(lat1, lon1, lat2, lon2):
     """Calculate the great-circle distance between two points in miles."""
@@ -61,6 +83,11 @@ def main():
         while True:
             try:
                 response = requests.get(DUMP1090_URL, timeout=3)
+                response_vr = requests.get(VR_URL)
+                if response_vr.status_code == 200:
+                    data_vr = response_vr.json()
+                    vr_list = data_vr.get("acList", [])
+
                 if response.status_code == 200:
                     data = response.json()
                     aircraft_list = data.get("aircraft", [])
@@ -71,11 +98,16 @@ def main():
                         ac_lat = ac.get("lat")
                         ac_lon = ac.get("lon")
                         hex_id = ac.get("hex")
-                        flight = ac.get("flight", "UNKNOWN").strip()
+                        flight = ac.get("flight", "Unknown").strip()
                         altitude = ac.get("alt_baro", ac.get("altitude", "unknown"))
+                        for vr_flight in vr_list:
+                            if vr_flight.get("Call") == flight:
+                                ac_from = get_airport(vr_flight.get("From", "None"))
+                                ac_to = get_airport(vr_flight.get("To", "None"))
+                                op = vr_flight.get("Op", "Unknown").strip()
 
                         # We need both lat and lon coordinates to check distance
-                        if ac_lat is not None and ac_lon is not None and altitude <=10000 and hex_id:
+                        if ac_lat is not None and ac_lon is not None and hex_id:
                             distance = haversine_distance(HOME_LAT, HOME_LON, ac_lat, ac_lon)
 
                             if distance <= MAX_DISTANCE_MILES:
@@ -90,6 +122,9 @@ def main():
                                         "altitude_feet": altitude,
                                         "lat": ac_lat,
                                         "lon": ac_lon,
+                                        "from": ac_from,
+                                        "to": ac_to,
+                                        "op": op,
                                         "timestamp": time.time()
                                     }
                                     
@@ -97,11 +132,11 @@ def main():
                                     json_payload = json.dumps(payload)
                                     print(json_payload)
                                     client.publish(MQTT_TOPIC, json_payload, qos=1)
-                                    print(f"ALERT: Flight {flight} ({hex_id}) is overhead! Dist: {round(distance, 2)} mi, Alt: {altitude} ft")
+                                    print(f"ALERT: Flight {flight} ({hex_id}) is overhead! Dist: {round(distance, 2)} mi, Alt: {altitude}")
                                     
                                     active_alerts[hex_id] = time.time()
 
-                    # Clean up tracked hex IDs that left the 2-mile radius zone
+                    # Clean up tracked hex IDs that left the radius
                     for cached_hex in list(active_alerts.keys()):
                         if cached_hex not in current_seen_hexes:
                             print(f"Flight left overhead zone: {cached_hex}")
