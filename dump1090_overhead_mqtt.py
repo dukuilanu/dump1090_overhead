@@ -4,17 +4,13 @@ import json
 import math
 import paho.mqtt.client as mqtt
 
-# --- CONFIGURATION ---
-# home location lat/lon
+# vars
 HOME_LAT = 41.83221
 HOME_LON = -72.7511054
 MAX_DISTANCE_MILES = 2
 
-# dump1090 JSON URL
 # dump1090-fa git repo that will work for this: https://github.com/flightaware/dump1090.git
 DUMP1090_URL = "http://localhost/aircraft.json"
-
-# Virtual Radar JSON URL
 VR_URL = "http://localhost:8083/VirtualRadar/aircraftlist.json"
 
 # MQTT Broker Details
@@ -23,32 +19,37 @@ MQTT_PORT = 1883
 MQTT_TOPIC = "aircraft/overhead"
 MQTT_CLIENT_ID = "dump1090_overhead_notifier"
 MQTT_USER = "mqttuser"
-MQTT_PASS = '949500'
+MQTT_PASS = 'xxxxx'
+
+
 # Polling Interval (in seconds)
 POLL_INTERVAL = 5
-# ---------------------
 
 # Getting a useful string for airports can be difficult:
 def get_airport(air_string):
     if ',' not in air_string:
+        #print(f"returning string, no commas")
         return air_string
     parts = air_string.rsplit(',')
-    if parts[1] != "United States":
-        return parts[1]
+    if parts[1].strip() != "United States":
+        return parts[1].strip()
     if len(parts) == 3:
+        #print(f"3 commas")
         output = parts[-2]
         output = output.strip()
+        #print(output)
         return output
     elif len(parts) == 2:
+        #print(f"2 commas")
         parts2 = parts[-2].split()
         if len(parts2) == 2:
-            output = parts2[1]
+            output = parts2[1].strip()
         else:
-            output = parts2[0]
+            output = parts2[0].strip()
+        #print(output)
         return output
 
 def haversine_distance(lat1, lon1, lat2, lon2):
-    """Calculate the great-circle distance between two points in miles."""
     R = 3958.8  # Earth radius in miles
     phi1 = math.radians(lat1)
     phi2 = math.radians(lat2)
@@ -99,6 +100,7 @@ def main():
                     for ac in aircraft_list:
                         ac_lat = ac.get("lat")
                         ac_lon = ac.get("lon")
+                        ac_head = ac.get("nav_heading", "Unknown")
                         hex_id = ac.get("hex")
                         flight = ac.get("flight", "Unknown").strip()
                         altitude = ac.get("alt_baro", ac.get("altitude", "unknown"))
@@ -107,9 +109,14 @@ def main():
                                 ac_from = get_airport(vr_flight.get("From", "None"))
                                 ac_to = get_airport(vr_flight.get("To", "None"))
                                 op = vr_flight.get("Op", "Unknown").strip()
+                                if ac_head != "Unknown":
+                                    if ac_head <= 270 and ac_head >= 90:
+                                        trak = "south"
+                                    else:
+                                        trak = "north"
 
                         # We need both lat and lon coordinates to check distance
-                        if ac_lat is not None and ac_lon is not None and hex_id:
+                        if ac_lat is not None and ac_lon is not None and altitude <= 10000 and hex_id:
                             distance = haversine_distance(HOME_LAT, HOME_LON, ac_lat, ac_lon)
 
                             if distance <= MAX_DISTANCE_MILES:
@@ -127,6 +134,7 @@ def main():
                                         "from": ac_from,
                                         "to": ac_to,
                                         "op": op,
+                                        "ns": trak,
                                         "timestamp": time.time()
                                     }
                                     
